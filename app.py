@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from PIL import Image
 
-from data.layout import DatasetLayoutError, summarize_category
+from data.layout import DatasetLayoutError, scan_category, summarize_category
 from data.transforms import build_image_transform
 from evaluation.report import inspection_report, report_markdown
 from inference.predict import load_detector, memory_dir, tensor_to_uint8
@@ -27,7 +27,7 @@ def main() -> None:
     st.caption("CPU-only PatchCore-inspired inspection. Scores are distances, not probabilities.")
 
     if section == "Overview":
-        _overview()
+        _overview(config, category)
     elif section == "Dataset":
         _dataset(config, category)
     elif section == "Model":
@@ -40,7 +40,7 @@ def main() -> None:
         _evaluation(config, category)
 
 
-def _overview() -> None:
+def _overview(config, category: str) -> None:
     import streamlit as st
 
     st.subheader("Project overview")
@@ -58,6 +58,8 @@ No accuracy number is shown until `evaluate.py` has written a report from real
 MVTec ground truth. Synthetic tests are not industrial results.
         """
     )
+    st.subheader("Local dataset")
+    _dataset(config, category)
 
 
 def _dataset(config, category: str) -> None:
@@ -71,12 +73,65 @@ def _dataset(config, category: str) -> None:
         st.error(str(exc))
         st.info("The dashboard does not download MVTec AD.")
         return
-    st.text(summary.render())
+    counts = st.columns(4)
+    counts[0].metric("Defect-free training", summary.train_good)
+    counts[1].metric("Normal test", summary.test_good)
+    counts[2].metric("Defective test", summary.test_anomaly)
+    counts[3].metric("Missing masks", summary.missing_masks)
+    if summary.defect_types:
+        defect_line = ", ".join(
+            f"{name} {count}" for name, count in sorted(summary.defect_types.items())
+        )
+        st.caption(f"Defect types: {defect_line}")
     if summary.missing_masks:
         st.warning(
             f"{summary.missing_masks} anomalous test images have no mask. "
             "Pixel metrics cannot be calculated for those images."
         )
+    _show_dataset_images(config.data.root, category)
+
+
+def _show_dataset_images(root, category: str) -> None:
+    import streamlit as st
+
+    samples = scan_category(root, category)
+    training = [sample for sample in samples if sample.defect_type == "train/good"][:4]
+    st.markdown("**Defect-free training images**")
+    columns = st.columns(len(training))
+    for column, sample in zip(columns, training):
+        column.image(
+            _preview(sample.path),
+            caption=sample.path.name,
+            use_container_width=True,
+        )
+
+    st.markdown("**One test image from each defect type, with its ground-truth mask**")
+    shown: set[str] = set()
+    for sample in samples:
+        if sample.label != 1 or sample.defect_type in shown:
+            continue
+        shown.add(sample.defect_type)
+        image_col, mask_col = st.columns(2)
+        image_col.image(
+            _preview(sample.path),
+            caption=f"{sample.defect_type}: {sample.path.name}",
+            use_container_width=True,
+        )
+        if sample.mask_path is not None and sample.mask_path.is_file():
+            mask_col.image(
+                _preview(sample.mask_path),
+                caption=sample.mask_path.name,
+                use_container_width=True,
+            )
+        else:
+            mask_col.warning("This defective image has no mask file.")
+
+
+def _preview(path):
+    with Image.open(path) as image:
+        preview = image.convert("RGB")
+        preview.thumbnail((320, 320))
+        return preview.copy()
 
 
 def _model(config, category: str) -> None:
