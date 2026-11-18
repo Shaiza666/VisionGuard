@@ -1,0 +1,62 @@
+# VisionGuard phase-1 defaults for an 8 GB CPU laptop.
+# These values are intentionally small. Do not raise image size or batch size
+# on the Intel HD Graphics 520 machine described in docs/hardware_limitations.md.
+
+seed: 42
+
+runtime:
+  device: cpu
+  num_workers: 0
+  batch_size: 1
+
+data:
+  # Local MVTec AD root. This project never downloads it.
+  root: datasets/mvtec
+  categories:
+    - bottle
+    - hazelnut
+  image_size: 128
+  # ImageNet normalization. Required when model.weights is imagenet.
+  mean: [0.485, 0.456, 0.406]
+  std: [0.229, 0.224, 0.225]
+
+model:
+  backbone: resnet18
+  # imagenet downloads torchvision weights on the first training run.
+  # none uses random weights and is only for code checks.
+  weights: imagenet
+  layers:
+    - layer2
+    - layer3
+  # Odd neighbourhood for local average pooling of feature maps.
+  neighborhood: 3
+
+memory:
+  # Fraction of the retained patch pool kept by greedy coreset selection.
+  coreset_ratio: 0.1
+  max_bank_size: 2048
+  # Hard cap on patches stored before coreset selection.
+  preselect_max: 8192
+  # Random patches kept from each nominal image before the reservoir cap.
+  patches_per_image: 64
+  query_chunk: 256
+  bank_chunk: 1024
+
+scoring:
+  # 1 uses the maximum nearest-neighbour distance as the image score.
+  # Values above 1 apply the neighbour reweighting from Roth et al., CVPR 2022.
+  score_neighbors: 1
+  # Roth et al. smoothed maps with sigma 4 at 224 px. That blur is too wide
+  # at 128 px, so phase 1 leaves smoothing off unless you set a positive value.
+  heatmap_smooth_sigma: 0
+
+evaluation:
+  max_pixels: 2000000
+  save_examples: 4
+  # null chooses the F1-maximizing threshold on the evaluated split and records
+  # that choice. Set a number only when you already have a threshold from
+  # earlier data. Do not treat a test-split threshold as a deployment cutoff.
+  image_threshold: null
+
+output:
+  directory: reports
